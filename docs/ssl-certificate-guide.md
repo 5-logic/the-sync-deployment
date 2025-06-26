@@ -26,7 +26,7 @@ sudo apt install certbot python3-certbot-nginx
 Run the following command to obtain and install the SSL certificate for your domain:
 
 ```bash
-sudo certbot --nginx -d thesync-server.eastus.cloudapp.azure.com
+sudo certbot --nginx -d [your-domain]
 ```
 
 **What this does:**
@@ -49,7 +49,7 @@ sudo certbot --nginx -d thesync-server.eastus.cloudapp.azure.com
 After successful installation, your certificates will be located at:
 
 ```
-/etc/letsencrypt/live/thesync-server.eastus.cloudapp.azure.com/
+/etc/letsencrypt/live/[your-domain]/
 ├── cert.pem
 ├── chain.pem
 ├── fullchain.pem
@@ -61,14 +61,14 @@ After successful installation, your certificates will be located at:
 When your certificate is close to expiration (recommended: 30 days before), run:
 
 ```bash
-sudo certbot --nginx -d thesync-server.eastus.cloudapp.azure.com
+sudo certbot --nginx -d [your-domain]
 ```
 
 ## Verification
 
 After installation, verify your SSL certificate by:
 
-1. Visiting `https://thesync-server.eastus.cloudapp.azure.com` in your browser
+1. Visiting `https://[your-domain]` in your browser
 2. Check that the connection is secure (lock icon in address bar)
 3. Test using online SSL checkers like SSL Labs
 
