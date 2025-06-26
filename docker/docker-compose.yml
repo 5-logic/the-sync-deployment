@@ -2,8 +2,6 @@ services:
   backend:
     image: ghcr.io/5-logic/the-sync-backend:latest
     container_name: the-sync-backend
-    ports:
-      - 4000:4000
     env_file:
       - .backend.env
     networks:
@@ -29,8 +27,6 @@ services:
     image: portainer/portainer-ce:latest
     container_name: portainer
     restart: unless-stopped
-    ports:
-      - 9000:9000
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
