@@ -1,6 +1,6 @@
 # TheSync Deployment Guide
 
-This guide will walk you through deploying TheSync application using Docker Compose with Nginx reverse proxy and Portainer.
+This guide will walk you through deploying TheSync application using Docker Compose with Nginx reverse proxy, Portainer, and Diun for container monitoring.
 
 ## Prerequisites
 
@@ -8,7 +8,7 @@ This guide will walk you through deploying TheSync application using Docker Comp
 - Docker Compose installed
 - Domain name pointed to your server IP
 - Ports 4000 and 9000 available
-- SSL certificates (Let's Encrypt or custom)
+- SSL certificates from Let's Encrypt or custom certificates
 
 ## Quick Start
 
@@ -19,23 +19,26 @@ This guide will walk you through deploying TheSync application using Docker Comp
    cd the-sync-deployment
    ```
 
-2. **Prepare SSL certificates**
+2. **Prepare SSL certificates (using Let's Encrypt live directory)**
 
    ```bash
-   # Create ssl directory
-   mkdir -p docker/ssl
+   # Ensure Let's Encrypt certificates exist
+   sudo certbot certonly --standalone -d your-domain.com
 
-   # Copy your SSL certificates to docker/ssl/
-   # Required files:
-   # - fullchain.pem (certificate + intermediate)
-   # - privkey.pem (private key)
+   # Verify certificates are in place
+   ls -la /etc/letsencrypt/live/your-domain.com/
    ```
 
-3. **Create environment file**
+3. **Create environment files**
 
    ```bash
+   # Backend configuration
    cp .backend.env.example .backend.env
    # Edit .backend.env with your configuration
+
+   # Diun Discord notification configuration
+   cp .diun.env.example .diun.env
+   # Edit .diun.env with your Discord webhook URL
    ```
 
 4. **Update Nginx configuration**
@@ -61,31 +64,42 @@ This guide will walk you through deploying TheSync application using Docker Comp
 ### TheSync Backend
 
 - **Container**: `the-sync-backend`
-- **Internal Port**: 4000
+- **Internal Port**: 4000 (not exposed, accessed via Nginx proxy)
 - **Image**: `ghcr.io/5-logic/the-sync-backend:latest`
 - **Configuration**: Uses `.backend.env` file
+- **Monitoring**: Monitored by Diun for updates
 - **Access**: Through Nginx proxy at port 4000
 
 ### Nginx Reverse Proxy
 
 - **Container**: `proxy`
 - **Ports**:
-  - 4000 (Backend proxy)
-  - 9000 (Portainer proxy)
+  - 4000 (Backend proxy with SSL)
+  - 9000 (Portainer proxy with SSL)
 - **Features**:
-  - SSL termination
+  - SSL termination using Let's Encrypt certificates
   - Reverse proxy for backend and Portainer
   - Custom nginx.conf configuration
+- **SSL Mount**: Direct mount from `/etc/letsencrypt/live/[yourdomain]`
 
 ### Portainer Community Edition
 
 - **Container**: `portainer`
-- **Internal Port**: 9000
+- **Internal Port**: 9000 (not exposed, accessed via Nginx proxy)
 - **Features**:
   - Docker container management
   - Web-based interface
   - System monitoring
 - **Access**: Through Nginx proxy at port 9000
+
+### Diun (Docker Image Update Notifier)
+
+- **Container**: `diun`
+- **Purpose**: Monitor Docker images for updates
+- **Schedule**: Checks every 10 minutes
+- **Notifications**: Discord webhook notifications
+- **Configuration**: Uses `.diun.env` file for Discord settings
+- **Target**: Monitors only `the-sync-backend` container
 
 ## Configuration Steps
 
@@ -112,9 +126,32 @@ API_KEY=your_api_key
 REDIS_URL=your_redis_url
 ```
 
-### 2. SSL Certificate Setup
+### 2. Diun Configuration
 
-#### Option 1: Using Let's Encrypt with Certbot
+Create `.diun.env` file in the docker directory for Discord notifications:
+
+```env
+# Diun Discord Notification Configuration
+DIUN_NOTIF_DISCORD_WEBHOOKURL=https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN
+
+# Optional: Additional Discord settings
+# DIUN_NOTIF_DISCORD_MENTIONS=@everyone
+# DIUN_NOTIF_DISCORD_TIMEOUT=10s
+# DIUN_NOTIF_DISCORD_RENDERFIELDS=true
+```
+
+**Setting up Discord Webhook:**
+
+1. Go to your Discord server settings
+2. Navigate to Integrations → Webhooks
+3. Create New Webhook
+4. Copy the webhook URL and paste it in `.diun.env`
+
+### 3. SSL Certificate Setup (Let's Encrypt Direct Mount)
+
+The application is configured to use Let's Encrypt certificates directly from the host system.
+
+#### Using Let's Encrypt with Certbot
 
 1. **Install Certbot**
 
@@ -131,38 +168,34 @@ REDIS_URL=your_redis_url
 
    ```bash
    # Stop any service using port 80
-   sudo systemctl stop nginx
+   sudo systemctl stop nginx apache2
 
    # Request certificate
    sudo certbot certonly --standalone -d your-domain.com
 
-   # Copy certificates to project directory
-   sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem docker/ssl/
-   sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem docker/ssl/
-   sudo chown $USER:$USER docker/ssl/*.pem
+   # Verify certificates are created
+   sudo ls -la /etc/letsencrypt/live/your-domain.com/
    ```
 
-3. **Setup Auto-Renewal**
+3. **Update docker-compose.yml**
+
+   ```bash
+   # Edit docker/docker-compose.yml
+   # Replace [yourdomain] with your actual domain name in the SSL mount path:
+   # - /etc/letsencrypt/live/your-domain.com:/etc/ssl:ro
+   ```
+
+4. **Setup Auto-Renewal**
 
    ```bash
    # Add to crontab
    sudo crontab -e
 
-   # Add this line for renewal every 2 months
-   0 3 1 */2 * certbot renew --quiet --post-hook "cp /etc/letsencrypt/live/your-domain.com/fullchain.pem /path/to/your/project/docker/ssl/ && cp /etc/letsencrypt/live/your-domain.com/privkey.pem /path/to/your/project/docker/ssl/ && docker-compose -f /path/to/your/project/docker/docker-compose.yml restart proxy"
+   # Add this line for renewal every 2 months with container restart
+   0 3 1 */2 * certbot renew --quiet --post-hook "docker-compose -f /path/to/your/project/docker/docker-compose.yml restart proxy"
    ```
 
-#### Option 2: Using Custom SSL Certificates
-
-If you have custom SSL certificates:
-
-```bash
-# Copy your certificates to the ssl directory
-cp your-certificate.crt docker/ssl/fullchain.pem
-cp your-private-key.key docker/ssl/privkey.pem
-```
-
-### 3. Nginx Configuration
+### 4. Nginx Configuration
 
 Edit `docker/nginx.conf` and replace `[your-domain]` with your actual domain:
 
@@ -206,7 +239,7 @@ http {
 }
 ```
 
-### 4. Portainer Setup
+### 5. Portainer Setup
 
 1. **Initial Setup**
 
@@ -218,26 +251,62 @@ http {
    - Select "Docker" environment
    - The connection should work automatically via Docker socket
 
+## Container Monitoring with Diun
+
+### Diun Configuration
+
+Diun monitors your containers for image updates and sends notifications:
+
+- **Monitoring Schedule**: Every 10 minutes (`*/10 * * * *`)
+- **Target Containers**: Only containers with `diun.enable=true` label
+- **Notifications**: Discord webhook notifications
+- **Configuration File**: `.diun.env`
+
+### Viewing Diun Logs
+
+```bash
+# View Diun logs
+docker logs diun
+
+# Follow logs in real-time
+docker logs -f diun
+
+# Check if Diun detected any updates
+docker logs diun | grep -i "update"
+```
+
+### Discord Notifications
+
+When a new image version is available, you'll receive Discord notifications containing:
+
+- Container name
+- Current image version
+- New image version available
+- Registry information
+- Timestamp
+
 ## SSL Certificate Management
 
-### Manual Certificate Management
+### Let's Encrypt Direct Mount
 
-Since we're using Nginx with custom SSL certificates:
+The application uses direct mount from Let's Encrypt certificates:
 
-- **Manual Renewal**: You need to renew certificates manually or via cron job
-- **Let's Encrypt**: Use Certbot as shown in setup section
-- **Custom Certificates**: Replace files in `docker/ssl/` directory
-- **Restart Required**: Restart nginx container after certificate updates
+- **Certificate Path**: `/etc/letsencrypt/live/[yourdomain]/`
+- **Mount Point**: `/etc/ssl` inside nginx container
+- **Auto-Renewal**: Via crontab with container restart
+- **No Manual Copy**: Certificates are used directly from Let's Encrypt directory
 
 ### Certificate Update Process
 
 ```bash
-# Update certificates
-sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem docker/ssl/
-sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem docker/ssl/
+# Renew certificates (if not using auto-renewal)
+sudo certbot renew
 
-# Restart nginx container
+# Restart nginx container to use new certificates
 docker-compose restart proxy
+
+# Verify certificate expiration
+sudo certbot certificates
 ```
 
 ## Monitoring and Maintenance
@@ -277,6 +346,7 @@ docker ps
 docker logs the-sync-backend
 docker logs proxy
 docker logs portainer
+docker logs diun
 
 # Check network connectivity
 docker network ls
@@ -287,24 +357,29 @@ docker network inspect the-sync_the-sync-network
 
 ### Important Data to Backup
 
-1. **SSL Certificates**
+1. **Let's Encrypt Certificates**
 
-   - Directory: `docker/ssl/`
-   - Contains: fullchain.pem, privkey.pem
+   - Directory: `/etc/letsencrypt/`
+   - Contains: All Let's Encrypt certificates and renewal configuration
 
 2. **Nginx Configuration**
 
    - File: `docker/nginx.conf`
    - Contains: Proxy configurations
 
-3. **Portainer Data**
+3. **Environment Files**
+
+   - File: `docker/.backend.env` - Backend configuration
+   - File: `docker/.diun.env` - Discord notification settings
+
+4. **Portainer Data**
 
    - Volume: `portainer_data`
    - Contains: Portainer configurations
 
-4. **Backend Environment**
-   - File: `docker/.backend.env`
-   - Contains: Application configuration
+5. **Diun Data**
+   - Volume: `diun_data`
+   - Contains: Diun monitoring data and history
 
 ### Backup Commands
 
@@ -312,17 +387,19 @@ docker network inspect the-sync_the-sync-network
 # Create backup directory
 mkdir -p backups/$(date +%Y%m%d)
 
-# Backup SSL certificates
-cp -r docker/ssl/ backups/$(date +%Y%m%d)/
+# Backup Let's Encrypt certificates (requires sudo)
+sudo tar czf backups/$(date +%Y%m%d)/letsencrypt_backup.tar.gz -C /etc letsencrypt
 
 # Backup nginx configuration
 cp docker/nginx.conf backups/$(date +%Y%m%d)/
 
-# Backup portainer volume
-docker run --rm -v the-sync_portainer_data:/data -v $(pwd)/backups/$(date +%Y%m%d):/backup alpine tar czf /backup/portainer_data.tar.gz -C /data .
-
-# Backup environment file
+# Backup environment files
 cp docker/.backend.env backups/$(date +%Y%m%d)/
+cp docker/.diun.env backups/$(date +%Y%m%d)/
+
+# Backup docker volumes
+docker run --rm -v the-sync_portainer_data:/data -v $(pwd)/backups/$(date +%Y%m%d):/backup alpine tar czf /backup/portainer_data.tar.gz -C /data .
+docker run --rm -v the-sync_diun_data:/data -v $(pwd)/backups/$(date +%Y%m%d):/backup alpine tar czf /backup/diun_data.tar.gz -C /data .
 ```
 
 ## Troubleshooting
@@ -340,28 +417,43 @@ cp docker/.backend.env backups/$(date +%Y%m%d)/
 
 2. **SSL Certificate Issues**
 
-   - Ensure certificates exist in `docker/ssl/` directory
-   - Check certificate permissions: `ls -la docker/ssl/`
-   - Verify certificate validity: `openssl x509 -in docker/ssl/fullchain.pem -text -noout`
-   - Check domain in nginx.conf matches your actual domain
+   - Ensure Let's Encrypt certificates exist: `sudo ls -la /etc/letsencrypt/live/your-domain.com/`
+   - Check certificate validity: `sudo openssl x509 -in /etc/letsencrypt/live/your-domain.com/fullchain.pem -text -noout`
+   - Verify domain in docker-compose.yml matches your actual domain
+   - Check nginx configuration: `docker exec proxy nginx -t`
 
-3. **Nginx Configuration Issues**
+3. **Discord Notification Issues**
+
+   - Verify Discord webhook URL in `.diun.env`
+   - Check Diun logs: `docker logs diun`
+   - Test webhook URL manually with curl
+   - Ensure Discord webhook permissions are correct
+
+4. **Nginx Configuration Issues**
 
    - Test nginx configuration: `docker exec proxy nginx -t`
    - Check nginx logs: `docker logs proxy`
    - Verify backend container name in nginx.conf matches docker-compose.yml
+   - Ensure SSL certificate paths are correct in nginx.conf
 
-4. **Backend Not Accessible**
+5. **Backend Not Accessible**
 
    - Check if backend container is running: `docker ps`
    - Check backend logs: `docker logs the-sync-backend`
    - Verify network connectivity between containers
    - Test direct backend access: `docker exec proxy curl http://backend:4000`
 
-5. **Permission Issues**
+6. **Diun Not Working**
+
+   - Check Diun container status: `docker ps | grep diun`
+   - Verify `.diun.env` file exists and is properly formatted
+   - Check if backend has `diun.enable=true` label
+   - Monitor Diun logs for errors: `docker logs -f diun`
+
+7. **Permission Issues**
    - Ensure Docker socket has proper permissions
    - On Linux: `sudo usermod -aG docker $USER`
-   - Check SSL certificate file permissions
+   - Check Let's Encrypt certificate access permissions
 
 ### Log Locations
 
