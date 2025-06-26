@@ -1,6 +1,6 @@
 # TheSync Deployment Guide
 
-This guide will walk you through deploying TheSync application using Docker Compose with Nginx reverse proxy, Portainer, and Diun for container monitoring.
+This guide will walk you through deploying TheSync application using Docker Compose with Nginx reverse proxy and Portainer for container management.
 
 ## Prerequisites
 
@@ -8,7 +8,7 @@ This guide will walk you through deploying TheSync application using Docker Comp
 - Docker Compose installed
 - Domain name pointed to your server IP
 - Ports 4000 and 9000 available
-- SSL certificates from Let's Encrypt or custom certificates
+- SSL certificates from Let's Encrypt
 
 ## Quick Start
 
@@ -19,33 +19,31 @@ This guide will walk you through deploying TheSync application using Docker Comp
    cd the-sync-deployment
    ```
 
-2. **Prepare SSL certificates (using Let's Encrypt live directory)**
+2. **Obtain SSL certificates using Let's Encrypt**
 
    ```bash
-   # Ensure Let's Encrypt certificates exist
+   # Install Certbot
+   sudo apt update && sudo apt install certbot
+
+   # Get SSL certificate
    sudo certbot certonly --standalone -d your-domain.com
 
-   # Verify certificates are in place
-   ls -la /etc/letsencrypt/live/your-domain.com/
+   # Verify certificates
+   sudo ls -la /etc/letsencrypt/live/your-domain.com/
    ```
 
-3. **Create environment files**
+3. **Create backend environment file**
 
    ```bash
-   # Backend configuration
    cp .backend.env.example .backend.env
    # Edit .backend.env with your configuration
-
-   # Diun Discord notification configuration
-   cp .diun.env.example .diun.env
-   # Edit .diun.env with your Discord webhook URL
    ```
 
-4. **Update Nginx configuration**
+4. **Update configuration files**
 
    ```bash
-   # Edit docker/nginx.conf
-   # Replace [your-domain] with your actual domain name
+   # Edit docker/docker-compose.yml - Replace [yourdomain] with your actual domain
+   # Edit docker/nginx.conf - Replace [your-domain] with your actual domain
    ```
 
 5. **Start all services**
@@ -61,18 +59,20 @@ This guide will walk you through deploying TheSync application using Docker Comp
 
 ## Services Overview
 
+## Services Overview
+
 ### TheSync Backend
 
-- **Container**: `the-sync-backend`
-- **Internal Port**: 4000 (not exposed, accessed via Nginx proxy)
+- **Container**: `backend`
 - **Image**: `ghcr.io/5-logic/the-sync-backend:latest`
 - **Configuration**: Uses `.backend.env` file
-- **Monitoring**: Monitored by Diun for updates
+- **Network**: Internal access only via Nginx proxy
 - **Access**: Through Nginx proxy at port 4000
 
 ### Nginx Reverse Proxy
 
 - **Container**: `proxy`
+- **Image**: `nginx:alpine`
 - **Ports**:
   - 4000 (Backend proxy with SSL)
   - 9000 (Portainer proxy with SSL)
@@ -85,21 +85,13 @@ This guide will walk you through deploying TheSync application using Docker Comp
 ### Portainer Community Edition
 
 - **Container**: `portainer`
-- **Internal Port**: 9000 (not exposed, accessed via Nginx proxy)
+- **Image**: `portainer/portainer-ce:latest`
+- **Purpose**: Docker container management interface
 - **Features**:
-  - Docker container management
-  - Web-based interface
-  - System monitoring
+  - Web-based Docker management
+  - Container monitoring and logs
+  - Image management
 - **Access**: Through Nginx proxy at port 9000
-
-### Diun (Docker Image Update Notifier)
-
-- **Container**: `diun`
-- **Purpose**: Monitor Docker images for updates
-- **Schedule**: Checks every 10 minutes
-- **Notifications**: Discord webhook notifications
-- **Configuration**: Uses `.diun.env` file for Discord settings
-- **Target**: Monitors only `the-sync-backend` container
 
 ## Configuration Steps
 
@@ -126,30 +118,32 @@ API_KEY=your_api_key
 REDIS_URL=your_redis_url
 ```
 
-### 2. Diun Configuration
+## Configuration Steps
 
-Create `.diun.env` file in the docker directory for Discord notifications:
+### 1. Environment Variables
+
+Create `.backend.env` file in the docker directory:
 
 ```env
-# Diun Discord Notification Configuration
-DIUN_NOTIF_DISCORD_WEBHOOKURL=https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN
+# Database Configuration
+DATABASE_URL=your_database_url
+DB_HOST=your_db_host
+DB_PORT=5432
+DB_NAME=your_db_name
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
 
-# Optional: Additional Discord settings
-# DIUN_NOTIF_DISCORD_MENTIONS=@everyone
-# DIUN_NOTIF_DISCORD_TIMEOUT=10s
-# DIUN_NOTIF_DISCORD_RENDERFIELDS=true
+# Application Configuration
+NODE_ENV=production
+PORT=4000
+JWT_SECRET=your_jwt_secret
+API_KEY=your_api_key
+
+# Other configurations
+REDIS_URL=your_redis_url
 ```
 
-**Setting up Discord Webhook:**
-
-1. Go to your Discord server settings
-2. Navigate to Integrations → Webhooks
-3. Create New Webhook
-4. Copy the webhook URL and paste it in `.diun.env`
-
-### 3. SSL Certificate Setup (Let's Encrypt Direct Mount)
-
-The application is configured to use Let's Encrypt certificates directly from the host system.
+### 2. SSL Certificate Setup
 
 #### Using Let's Encrypt with Certbot
 
@@ -181,7 +175,7 @@ The application is configured to use Let's Encrypt certificates directly from th
 
    ```bash
    # Edit docker/docker-compose.yml
-   # Replace [yourdomain] with your actual domain name in the SSL mount path:
+   # Replace [yourdomain] with your actual domain name:
    # - /etc/letsencrypt/live/your-domain.com:/etc/ssl:ro
    ```
 
@@ -195,7 +189,7 @@ The application is configured to use Let's Encrypt certificates directly from th
    0 3 1 */2 * certbot renew --quiet --post-hook "docker-compose -f /path/to/your/project/docker/docker-compose.yml restart proxy"
    ```
 
-### 4. Nginx Configuration
+### 3. Nginx Configuration
 
 Edit `docker/nginx.conf` and replace `[your-domain]` with your actual domain:
 
@@ -239,7 +233,7 @@ http {
 }
 ```
 
-### 5. Portainer Setup
+### 4. Portainer Setup
 
 1. **Initial Setup**
 
@@ -250,40 +244,6 @@ http {
 2. **Connect to Docker**
    - Select "Docker" environment
    - The connection should work automatically via Docker socket
-
-## Container Monitoring with Diun
-
-### Diun Configuration
-
-Diun monitors your containers for image updates and sends notifications:
-
-- **Monitoring Schedule**: Every 10 minutes (`*/10 * * * *`)
-- **Target Containers**: Only containers with `diun.enable=true` label
-- **Notifications**: Discord webhook notifications
-- **Configuration File**: `.diun.env`
-
-### Viewing Diun Logs
-
-```bash
-# View Diun logs
-docker logs diun
-
-# Follow logs in real-time
-docker logs -f diun
-
-# Check if Diun detected any updates
-docker logs diun | grep -i "update"
-```
-
-### Discord Notifications
-
-When a new image version is available, you'll receive Discord notifications containing:
-
-- Container name
-- Current image version
-- New image version available
-- Registry information
-- Timestamp
 
 ## SSL Certificate Management
 
@@ -343,10 +303,9 @@ Check service health:
 docker ps
 
 # Check container logs
-docker logs the-sync-backend
+docker logs backend
 docker logs proxy
 docker logs portainer
-docker logs diun
 
 # Check network connectivity
 docker network ls
@@ -367,19 +326,14 @@ docker network inspect the-sync_the-sync-network
    - File: `docker/nginx.conf`
    - Contains: Proxy configurations
 
-3. **Environment Files**
+3. **Backend Environment**
 
-   - File: `docker/.backend.env` - Backend configuration
-   - File: `docker/.diun.env` - Discord notification settings
+   - File: `docker/.backend.env`
+   - Contains: Backend application configuration
 
 4. **Portainer Data**
-
    - Volume: `portainer_data`
-   - Contains: Portainer configurations
-
-5. **Diun Data**
-   - Volume: `diun_data`
-   - Contains: Diun monitoring data and history
+   - Contains: Portainer configurations and settings
 
 ### Backup Commands
 
@@ -393,13 +347,11 @@ sudo tar czf backups/$(date +%Y%m%d)/letsencrypt_backup.tar.gz -C /etc letsencry
 # Backup nginx configuration
 cp docker/nginx.conf backups/$(date +%Y%m%d)/
 
-# Backup environment files
+# Backup backend environment file
 cp docker/.backend.env backups/$(date +%Y%m%d)/
-cp docker/.diun.env backups/$(date +%Y%m%d)/
 
-# Backup docker volumes
+# Backup portainer volume
 docker run --rm -v the-sync_portainer_data:/data -v $(pwd)/backups/$(date +%Y%m%d):/backup alpine tar czf /backup/portainer_data.tar.gz -C /data .
-docker run --rm -v the-sync_diun_data:/data -v $(pwd)/backups/$(date +%Y%m%d):/backup alpine tar czf /backup/diun_data.tar.gz -C /data .
 ```
 
 ## Troubleshooting
@@ -422,35 +374,21 @@ docker run --rm -v the-sync_diun_data:/data -v $(pwd)/backups/$(date +%Y%m%d):/b
    - Verify domain in docker-compose.yml matches your actual domain
    - Check nginx configuration: `docker exec proxy nginx -t`
 
-3. **Discord Notification Issues**
-
-   - Verify Discord webhook URL in `.diun.env`
-   - Check Diun logs: `docker logs diun`
-   - Test webhook URL manually with curl
-   - Ensure Discord webhook permissions are correct
-
-4. **Nginx Configuration Issues**
+3. **Nginx Configuration Issues**
 
    - Test nginx configuration: `docker exec proxy nginx -t`
    - Check nginx logs: `docker logs proxy`
    - Verify backend container name in nginx.conf matches docker-compose.yml
    - Ensure SSL certificate paths are correct in nginx.conf
 
-5. **Backend Not Accessible**
+4. **Backend Not Accessible**
 
    - Check if backend container is running: `docker ps`
-   - Check backend logs: `docker logs the-sync-backend`
+   - Check backend logs: `docker logs backend`
    - Verify network connectivity between containers
    - Test direct backend access: `docker exec proxy curl http://backend:4000`
 
-6. **Diun Not Working**
-
-   - Check Diun container status: `docker ps | grep diun`
-   - Verify `.diun.env` file exists and is properly formatted
-   - Check if backend has `diun.enable=true` label
-   - Monitor Diun logs for errors: `docker logs -f diun`
-
-7. **Permission Issues**
+5. **Permission Issues**
    - Ensure Docker socket has proper permissions
    - On Linux: `sudo usermod -aG docker $USER`
    - Check Let's Encrypt certificate access permissions
