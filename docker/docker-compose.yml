@@ -4,6 +4,8 @@ services:
     container_name: the-sync-backend
     env_file:
       - .backend.env
+    labels:
+      - "diun.enable=true"
     networks:
       - the-sync-network
 
@@ -16,7 +18,7 @@ services:
       - 9000:9000
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./ssl:/etc/ssl:ro
+      - /etc/letsencrypt/live/[yourdomain]:/etc/ssl:ro
     depends_on:
       - backend
       - portainer
@@ -33,20 +35,27 @@ services:
     networks:
       - the-sync-network
 
-  watchtower:
-    image: containrrr/watchtower
-    container_name: watchtower
+  diun:
+    image: crazymax/diun:latest
+    container_name: diun
     restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - diun_data:/data
+    env_file:
+      - .diun.env
     environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_POLL_INTERVAL=300
-      - WATCHTOWER_INCLUDE_STOPPED=true
-      - WATCHTOWER_REVIVE_STOPPED=false
-      - WATCHTOWER_MONITOR_ONLY=false
-      - WATCHTOWER_NOTIFICATIONS=shoutrrr://logger://
-    command: --interval 300 the-sync-backend
+      - TZ=UTC
+      - LOG_LEVEL=info
+      - LOG_JSON=false
+      - DIUN_WATCH_WORKERS=10
+      - DIUN_WATCH_SCHEDULE=*/10 * * * *
+      - DIUN_PROVIDERS_DOCKER=true
+      - DIUN_PROVIDERS_DOCKER_WATCHBYDEFAULT=false
+      - DIUN_NOTIF_DISCORD_MENTIONS=@everyone
+      - DIUN_NOTIF_DISCORD_TIMEOUT=10s
+    labels:
+      - "diun.enable=true"
     networks:
       - the-sync-network
 
@@ -56,5 +65,6 @@ networks:
 
 volumes:
   portainer_data:
+  diun_data:
 
 name: the-sync
