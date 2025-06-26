@@ -33,6 +33,23 @@ services:
     networks:
       - the-sync-network
 
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=300
+      - WATCHTOWER_INCLUDE_STOPPED=true
+      - WATCHTOWER_REVIVE_STOPPED=false
+      - WATCHTOWER_MONITOR_ONLY=false
+      - WATCHTOWER_NOTIFICATIONS=shoutrrr://logger://
+    command: --interval 300 the-sync-backend
+    networks:
+      - the-sync-network
+
 networks:
   the-sync-network:
     driver: bridge
