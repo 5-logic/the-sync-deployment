@@ -1,13 +1,14 @@
 # TheSync Deployment Guide
 
-This guide will walk you through deploying TheSync application using Docker Compose with Nginx Proxy Manager and Portainer.
+This guide will walk you through deploying TheSync application using Docker Compose with Nginx reverse proxy and Portainer.
 
 ## Prerequisites
 
 - Docker installed on your server
 - Docker Compose installed
 - Domain name pointed to your server IP
-- Ports 80, 443, 4000, 9000, and 81 available
+- Ports 4000 and 9000 available
+- SSL certificates (Let's Encrypt or custom)
 
 ## Quick Start
 
@@ -18,56 +19,73 @@ This guide will walk you through deploying TheSync application using Docker Comp
    cd the-sync-deployment
    ```
 
-2. **Create environment file**
+2. **Prepare SSL certificates**
+
+   ```bash
+   # Create ssl directory
+   mkdir -p docker/ssl
+
+   # Copy your SSL certificates to docker/ssl/
+   # Required files:
+   # - fullchain.pem (certificate + intermediate)
+   # - privkey.pem (private key)
+   ```
+
+3. **Create environment file**
 
    ```bash
    cp .backend.env.example .backend.env
    # Edit .backend.env with your configuration
    ```
 
-3. **Start all services**
+4. **Update Nginx configuration**
+
+   ```bash
+   # Edit docker/nginx.conf
+   # Replace [your-domain] with your actual domain name
+   ```
+
+5. **Start all services**
 
    ```bash
    cd docker
    docker-compose up -d
    ```
 
-4. **Access the services**
-   - **TheSync Backend**: `http://your-domain:4000`
-   - **Nginx Proxy Manager**: `http://your-domain:81`
-   - **Portainer**: `http://your-domain:9000`
+6. **Access the services**
+   - **TheSync Backend**: `https://your-domain:4000`
+   - **Portainer**: `https://your-domain:9000`
 
 ## Services Overview
 
 ### TheSync Backend
 
 - **Container**: `the-sync-backend`
-- **Port**: 4000
+- **Internal Port**: 4000
 - **Image**: `ghcr.io/5-logic/the-sync-backend:latest`
 - **Configuration**: Uses `.backend.env` file
+- **Access**: Through Nginx proxy at port 4000
 
-### Nginx Proxy Manager
+### Nginx Reverse Proxy
 
-- **Container**: `nginx-proxy-manager`
+- **Container**: `proxy`
 - **Ports**:
-  - 80 (HTTP)
-  - 443 (HTTPS)
-  - 81 (Admin Interface)
+  - 4000 (Backend proxy)
+  - 9000 (Portainer proxy)
 - **Features**:
-  - Automatic SSL certificate generation with Let's Encrypt
-  - Web-based configuration
-  - Reverse proxy management
+  - SSL termination
+  - Reverse proxy for backend and Portainer
+  - Custom nginx.conf configuration
 
 ### Portainer Community Edition
 
 - **Container**: `portainer`
-- **Ports**:
-  - 9000 (HTTP Interface)
-  - 9443 (HTTPS Interface)
+- **Internal Port**: 9000
 - **Features**:
   - Docker container management
   - Web-based interface
   - System monitoring
+- **Access**: Through Nginx proxy at port 9000
 
 ## Configuration Steps
 
@@ -94,44 +112,105 @@ API_KEY=your_api_key
 REDIS_URL=your_redis_url
 ```
 
-### 2. Nginx Proxy Manager Setup
+### 2. SSL Certificate Setup
 
-1. **Access Admin Panel**
+#### Option 1: Using Let's Encrypt with Certbot
 
-   - URL: `http://your-server-ip:81`
-   - Default credentials:
-     - Email: `admin@example.com`
-     - Password: `changeme`
+1. **Install Certbot**
 
-2. **Change Default Password**
+   ```bash
+   # Ubuntu/Debian
+   sudo apt update
+   sudo apt install certbot
 
-   - Log in and immediately change the default credentials
-   - Go to Users → Admin → Edit
+   # CentOS/RHEL
+   sudo yum install certbot
+   ```
 
-3. **Create Proxy Host**
+2. **Obtain SSL Certificate**
 
-   - Go to "Proxy Hosts" → "Add Proxy Host"
-   - **Domain Names**: `your-domain.com`
-   - **Scheme**: `http`
-   - **Forward Hostname/IP**: `backend` (container name)
-   - **Forward Port**: `4000`
-   - **Block Common Exploits**: ✓
-   - **Websockets Support**: ✓ (if needed)
+   ```bash
+   # Stop any service using port 80
+   sudo systemctl stop nginx
 
-4. **SSL Certificate**
-   - In the same dialog, go to "SSL" tab
-   - **SSL Certificate**: "Request a new SSL Certificate"
-   - **Force SSL**: ✓
-   - **HTTP/2 Support**: ✓
-   - **HSTS Enabled**: ✓
-   - **Email**: your-email@domain.com
-   - **I Agree to the Let's Encrypt Terms of Service**: ✓
+   # Request certificate
+   sudo certbot certonly --standalone -d your-domain.com
 
-### 3. Portainer Setup
+   # Copy certificates to project directory
+   sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem docker/ssl/
+   sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem docker/ssl/
+   sudo chown $USER:$USER docker/ssl/*.pem
+   ```
+
+3. **Setup Auto-Renewal**
+
+   ```bash
+   # Add to crontab
+   sudo crontab -e
+
+   # Add this line for renewal every 2 months
+   0 3 1 */2 * certbot renew --quiet --post-hook "cp /etc/letsencrypt/live/your-domain.com/fullchain.pem /path/to/your/project/docker/ssl/ && cp /etc/letsencrypt/live/your-domain.com/privkey.pem /path/to/your/project/docker/ssl/ && docker-compose -f /path/to/your/project/docker/docker-compose.yml restart proxy"
+   ```
+
+#### Option 2: Using Custom SSL Certificates
+
+If you have custom SSL certificates:
+
+```bash
+# Copy your certificates to the ssl directory
+cp your-certificate.crt docker/ssl/fullchain.pem
+cp your-private-key.key docker/ssl/privkey.pem
+```
+
+### 3. Nginx Configuration
+
+Edit `docker/nginx.conf` and replace `[your-domain]` with your actual domain:
+
+```nginx
+events {
+    worker_connections 1024;
+}
+
+http {
+    server {
+        listen 4000 ssl;
+        server_name your-actual-domain.com;
+
+        ssl_certificate /etc/ssl/fullchain.pem;
+        ssl_certificate_key /etc/ssl/privkey.pem;
+
+        location / {
+            proxy_pass http://backend:4000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+
+    server {
+        listen 9000 ssl;
+        server_name your-actual-domain.com;
+
+        ssl_certificate /etc/ssl/fullchain.pem;
+        ssl_certificate_key /etc/ssl/privkey.pem;
+
+        location / {
+            proxy_pass http://portainer:9000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+}
+```
+
+### 4. Portainer Setup
 
 1. **Initial Setup**
 
-   - URL: `http://your-server-ip:9000`
+   - URL: `https://your-domain:9000`
    - Create admin user on first visit
    - Choose "Local" to manage local Docker environment
 
@@ -141,12 +220,25 @@ REDIS_URL=your_redis_url
 
 ## SSL Certificate Management
 
-Nginx Proxy Manager handles SSL certificates automatically:
+### Manual Certificate Management
 
-- **Automatic Renewal**: Certificates are renewed automatically
-- **Let's Encrypt Integration**: Built-in ACME client
-- **Wildcard Support**: Supports wildcard certificates
-- **Multiple Domains**: Can handle multiple domains per certificate
+Since we're using Nginx with custom SSL certificates:
+
+- **Manual Renewal**: You need to renew certificates manually or via cron job
+- **Let's Encrypt**: Use Certbot as shown in setup section
+- **Custom Certificates**: Replace files in `docker/ssl/` directory
+- **Restart Required**: Restart nginx container after certificate updates
+
+### Certificate Update Process
+
+```bash
+# Update certificates
+sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem docker/ssl/
+sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem docker/ssl/
+
+# Restart nginx container
+docker-compose restart proxy
+```
 
 ## Monitoring and Maintenance
 
@@ -183,7 +275,7 @@ docker ps
 
 # Check container logs
 docker logs the-sync-backend
-docker logs nginx-proxy-manager
+docker logs proxy
 docker logs portainer
 
 # Check network connectivity
@@ -195,13 +287,15 @@ docker network inspect the-sync_the-sync-network
 
 ### Important Data to Backup
 
-1. **Nginx Proxy Manager**
-   - Volume: `npm_data`
-   - Contains: Proxy configurations, user accounts
-2. **SSL Certificates**
+1. **SSL Certificates**
 
-   - Volume: `npm_letsencrypt`
-   - Contains: Let's Encrypt certificates
+   - Directory: `docker/ssl/`
+   - Contains: fullchain.pem, privkey.pem
+
+2. **Nginx Configuration**
+
+   - File: `docker/nginx.conf`
+   - Contains: Proxy configurations
 
 3. **Portainer Data**
 
@@ -209,7 +303,7 @@ docker network inspect the-sync_the-sync-network
    - Contains: Portainer configurations
 
 4. **Backend Environment**
-   - File: `.backend.env`
+   - File: `docker/.backend.env`
    - Contains: Application configuration
 
 ### Backup Commands
@@ -218,9 +312,13 @@ docker network inspect the-sync_the-sync-network
 # Create backup directory
 mkdir -p backups/$(date +%Y%m%d)
 
-# Backup volumes
-docker run --rm -v the-sync_npm_data:/data -v $(pwd)/backups/$(date +%Y%m%d):/backup alpine tar czf /backup/npm_data.tar.gz -C /data .
-docker run --rm -v the-sync_npm_letsencrypt:/data -v $(pwd)/backups/$(date +%Y%m%d):/backup alpine tar czf /backup/npm_letsencrypt.tar.gz -C /data .
+# Backup SSL certificates
+cp -r docker/ssl/ backups/$(date +%Y%m%d)/
+
+# Backup nginx configuration
+cp docker/nginx.conf backups/$(date +%Y%m%d)/
+
+# Backup portainer volume
 docker run --rm -v the-sync_portainer_data:/data -v $(pwd)/backups/$(date +%Y%m%d):/backup alpine tar czf /backup/portainer_data.tar.gz -C /data .
 
 # Backup environment file
@@ -235,30 +333,40 @@ cp docker/.backend.env backups/$(date +%Y%m%d)/
 
    ```bash
    # Check what's using the port
-   netstat -tulpn | grep :80
+   netstat -tulpn | grep :4000
+   netstat -tulpn | grep :9000
    # Stop the conflicting service or change ports in docker-compose.yml
    ```
 
-2. **SSL Certificate Failed**
+2. **SSL Certificate Issues**
 
-   - Ensure domain points to your server
-   - Check if ports 80 and 443 are accessible from internet
-   - Verify DNS propagation: `nslookup your-domain.com`
+   - Ensure certificates exist in `docker/ssl/` directory
+   - Check certificate permissions: `ls -la docker/ssl/`
+   - Verify certificate validity: `openssl x509 -in docker/ssl/fullchain.pem -text -noout`
+   - Check domain in nginx.conf matches your actual domain
 
-3. **Backend Not Accessible**
+3. **Nginx Configuration Issues**
+
+   - Test nginx configuration: `docker exec proxy nginx -t`
+   - Check nginx logs: `docker logs proxy`
+   - Verify backend container name in nginx.conf matches docker-compose.yml
+
+4. **Backend Not Accessible**
 
    - Check if backend container is running: `docker ps`
    - Check backend logs: `docker logs the-sync-backend`
    - Verify network connectivity between containers
+   - Test direct backend access: `docker exec proxy curl http://backend:4000`
 
-4. **Permission Issues**
+5. **Permission Issues**
    - Ensure Docker socket has proper permissions
    - On Linux: `sudo usermod -aG docker $USER`
+   - Check SSL certificate file permissions
 
 ### Log Locations
 
 - **Application Logs**: `docker logs [container-name]`
-- **Nginx Proxy Manager**: Access logs through web interface
+- **Nginx Access/Error Logs**: `docker logs proxy`
 - **System Logs**: `/var/log/` on host system
 
 ## Security Considerations
