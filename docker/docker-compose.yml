@@ -4,8 +4,6 @@ services:
     container_name: backend
     env_file:
       - .backend.env
-    labels:
-      - "diun.enable=true"
     networks:
       - the-sync-network
 
