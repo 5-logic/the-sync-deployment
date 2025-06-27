@@ -2,6 +2,9 @@ services:
   backend:
     image: ghcr.io/5-logic/the-sync-backend:latest
     container_name: backend
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379
     env_file:
       - .backend.env
     networks:
@@ -33,11 +36,21 @@ services:
     networks:
       - the-sync-network
   
+  redis:
+    image: redis:8.0.2-alpine
+    container_name: redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - the-sync-network
+  
 networks:
   the-sync-network:
     driver: bridge
 
 volumes:
   portainer_data:
+  redis_data:
 
 name: the-sync
